@@ -179,6 +179,33 @@ class FilesController {
 
     return res.status(200).json(updatedFile);
   }
+  static async getFile(req, res) {
+    const { id } = req.params;
+    const { size } = req.query;
+
+    const file = await dbClient.client
+      .db(dbClient.database)
+      .collection("files")
+      .findOne({ _id: ObjectId(id) });
+
+    if (!file) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    if (file.type === "folder") {
+      return res.status(400).json({ error: "A folder doesn't have content" });
+    }
+
+    const filePath = size ? `${file.localPath}_${size}` : file.localPath;
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const mimeType = mime.lookup(file.name);
+    res.setHeader("Content-Type", mimeType);
+    fs.createReadStream(filePath).pipe(res);
+  }
 }
 
 export default FilesController;
