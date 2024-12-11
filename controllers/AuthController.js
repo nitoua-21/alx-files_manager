@@ -1,83 +1,54 @@
 import sha1 from 'sha1';
 import { v4 as uuidv4 } from 'uuid';
-import dbClient from '../utils/db';
 import redisClient from '../utils/redis';
+import dbClient from '../utils/db';
 
 class AuthController {
   static async getConnect(req, res) {
-    // Get Authorization header
-    const authHeader = req.headers.authorization;
+    const authHeader = req.header('Authorization');
 
-    // Check if Authorization header exists
     if (!authHeader || !authHeader.startsWith('Basic ')) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Decode Base64 credentials
-    const credentials = Buffer.from(
-      authHeader.split(' ')[1], 
-      'base64'
-    ).toString('utf-8');
+    const base64Credentials = authHeader.split(' ')[1];
+    const [email, password] = Buffer.from(base64Credentials, 'base64').toString('utf-8').split(':');
 
-    // Split email and password
-    const [email, password] = credentials.split(':');
-
-    // Validate credentials
     if (!email || !password) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Hash password
     const hashedPassword = sha1(password);
+    const userCollection = dbClient.client.db(dbClient.database).collection('users');
+    const user = await userCollection.findOne({ email, password: hashedPassword });
 
-    // Find user in database
-    const db = dbClient.client.db();
-    const user = await db.collection('users').findOne({ 
-      email, 
-      password: hashedPassword 
-    });
-
-    // If no user found, return unauthorized
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Generate token
     const token = uuidv4();
-
-    // Store token in Redis with user ID for 24 hours
     const key = `auth_${token}`;
-    await redisClient.set(key, user._id.toString(), 24 * 60 * 60);
+    await redisClient.set(key, user._id.toString(), 24 * 3600);
 
-    // Return token
     return res.status(200).json({ token });
   }
 
   static async getDisconnect(req, res) {
-    // Get token from headers
-    const token = req.headers['x-token'];
+    const token = req.header('X-Token');
 
-    // If no token, return unauthorized
     if (!token) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Create Redis key
     const key = `auth_${token}`;
-
-    // Check if token exists in Redis
     const userId = await redisClient.get(key);
 
-    // If no user found, return unauthorized
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Delete token from Redis
     await redisClient.del(key);
-
-    // Return success status
-    return res.status(204).end();
+    return res.status(204).send();
   }
 }
 
